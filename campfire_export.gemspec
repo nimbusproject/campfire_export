@@ -20,7 +20,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency "fuubar",   "~> 0.0.5"
   s.add_development_dependency "rspec",    "~> 2.6.0"
   s.add_dependency "tzinfo",   "~> 0.3.54"
-  s.add_dependency "httparty", "~> 0.15.0"
+  s.add_dependency "httparty", "~> 0.16.2"
   s.add_dependency "nokogiri", "~> 1.8.0"
 
   s.files         = `git ls-files`.split("\n")
