@@ -39,7 +39,7 @@ module CampfireExport
 
     def get(path, params = {})
       url = api_url(path)
-      response = HTTParty.get(url, :query => params, :basic_auth => 
+      response = HTTParty.get(url, :query => params, :basic_auth =>
         {:username => CampfireExport::Account.api_token, :password => 'X'})
 
       if response.code >= 400
@@ -47,7 +47,7 @@ module CampfireExport
       end
       response
     end
-    
+
     def zero_pad(number)
       "%02d" % number
     end
@@ -58,17 +58,17 @@ module CampfireExport
         "#{date.year}/#{zero_pad(date.mon)}/#{zero_pad(date.day)}"
     end
 
-    # Requires that room_name and date be defined in the calling object.    
-    def export_file(content, filename, mode='w')
+    # Requires that room_name and date be defined in the calling object.
+    def export_file(content, filename, mode='wb')
       # Check to make sure we're writing into the target directory tree.
       true_path = File.expand_path(File.join(export_dir, filename))
-      
+
       unless true_path.start_with?(File.expand_path(export_dir))
         raise CampfireExport::Exception.new("#{export_dir}/#{filename}",
           "can't export file to a directory higher than target directory; " +
           "expected: #{File.expand_path(export_dir)}, actual: #{true_path}.")
       end
-      
+
       if File.exists?("#{export_dir}/#{filename}")
         log(:error, "#{export_dir}/#{filename} failed: file already exists")
       else
@@ -77,20 +77,20 @@ module CampfireExport
         end
       end
     end
-    
+
     def verify_export(filename, expected_size)
       full_path = "#{export_dir}/#{filename}"
       unless File.exists?(full_path)
-        raise CampfireExport::Exception.new(full_path, 
+        raise CampfireExport::Exception.new(full_path,
           "file should have been exported but did not make it to disk")
       end
       unless File.size(full_path) == expected_size
-        raise CampfireExport::Exception.new(full_path, 
+        raise CampfireExport::Exception.new(full_path,
           "exported file exists but is not the right size " +
           "(expected: #{expected_size}, actual: #{File.size(full_path)})")
       end
     end
-    
+
     def log(level, message, exception=nil)
       case level
       when :error
@@ -109,7 +109,7 @@ module CampfireExport
       end
     end
   end
-  
+
   class Exception < StandardError
     attr_accessor :resource, :message, :code
     def initialize(resource, message, code=nil)
@@ -126,16 +126,16 @@ module CampfireExport
   class Account
     include CampfireExport::IO
     include CampfireExport::TimeZone
-    
+
     @subdomain = ""
     @api_token = ""
     @base_url  = ""
     @timezone  = nil
-    
+
     class << self
       attr_accessor :subdomain, :api_token, :base_url, :timezone
     end
-    
+
     def initialize(subdomain, api_token)
       Account.subdomain = subdomain
       Account.api_token = api_token
@@ -157,21 +157,21 @@ module CampfireExport
   class Room
     include CampfireExport::IO
     attr_accessor :id, :name, :created_at, :last_update
-    
+
     def initialize(room_xml)
       @id         = room_xml.xpath('id').text
       @name       = room_xml.xpath('name').text
       created_utc = DateTime.parse(room_xml.xpath('created-at').text)
       @created_at = Account.timezone.utc_to_local(created_utc)
     end
-    
+
     def export(start_date=nil, end_date=nil)
       # Figure out how to do the least amount of work while still conforming
       # to the requester's boundary dates.
       find_last_update
       start_date.nil? ? date = created_at      : date = [start_date, created_at].max
       end_date.nil?   ? end_date = last_update : end_date = [end_date, last_update].min
-      
+
       while date <= end_date
         transcript = Transcript.new(self, date)
         transcript.export
@@ -181,7 +181,7 @@ module CampfireExport
         date = date.next
       end
     end
-    
+
     private
       def find_last_update
         begin
@@ -189,8 +189,8 @@ module CampfireExport
           update_utc   = DateTime.parse(last_message.xpath('/messages/message[1]/created-at').text)
           @last_update = Account.timezone.utc_to_local(update_utc)
         rescue Exception => e
-          log(:error, 
-              "couldn't get last update in #{room} (defaulting to today)", 
+          log(:error,
+              "couldn't get last update in #{room} (defaulting to today)",
               e)
           @last_update = Time.now
         end
@@ -200,16 +200,16 @@ module CampfireExport
   class Transcript
     include CampfireExport::IO
     attr_accessor :room, :date, :xml, :messages
-    
+
     def initialize(room, date)
       @room     = room
       @date     = date
     end
-    
+
     def transcript_path
       "/room/#{room.id}/transcript/#{date.year}/#{date.mon}/#{date.mday}"
     end
-    
+
     def export
       begin
         log(:info, "#{export_dir} ... ")
@@ -220,7 +220,7 @@ module CampfireExport
         @messages = xml.xpath('/messages/message').map do |message|
           CampfireExport::Message.new(message, room, date)
         end
-      
+
         # Only export transcripts that contain at least one message.
         if messages.length > 0
           log(:info, "exporting transcripts\n")
@@ -236,14 +236,14 @@ module CampfireExport
           end
         else
           log(:info, "no messages\n")
-        end      
+        end
       end
     end
-    
+
     def export_xml
       begin
         export_file(xml, 'transcript.xml')
-        verify_export('transcript.xml', xml.to_s.length)
+        verify_export('transcript.xml', xml.to_s.bytesize)
       rescue Exception => e
         log(:error, "XML transcript export for #{export_dir} failed", e)
       end
@@ -256,17 +256,17 @@ module CampfireExport
         plaintext << "#{room.name}: #{date_header}\n\n"
         messages.each {|message| plaintext << message.to_s }
         export_file(plaintext, 'transcript.txt')
-        verify_export('transcript.txt', plaintext.length)
+        verify_export('transcript.txt', plaintext.bytesize)
       rescue Exception => e
         log(:error, "Plaintext transcript export for #{export_dir} failed", e)
       end
     end
-        
+
     def export_html
       begin
         transcript_html = get(transcript_path)
 
-        # Make the upload links in the transcript clickable from the exported 
+        # Make the upload links in the transcript clickable from the exported
         # directory layout.
         transcript_html.gsub!(%Q{href="/room/#{room.id}/uploads/},
                               %Q{href="uploads/})
@@ -274,9 +274,9 @@ module CampfireExport
         # directory layout.
         transcript_html.gsub!(%Q{src="/room/#{room.id}/thumb/},
                               %Q{src="thumbs/})
-        
+
         export_file(transcript_html, 'transcript.html')
-        verify_export('transcript.html', transcript_html.length)
+        verify_export('transcript.html', transcript_html.bytesize)
       rescue Exception => e
         log(:error, "HTML transcript export for #{export_dir} failed", e)
       end
@@ -293,9 +293,9 @@ module CampfireExport
           end
         end
       end
-    end    
+    end
   end
-  
+
   class Message
     include CampfireExport::IO
     attr_accessor :id, :room, :body, :type, :user, :date, :timestamp, :upload
@@ -315,7 +315,7 @@ module CampfireExport
       unless no_user.include?(@type)
         @user = username(message.xpath('user-id').text)
       end
-      
+
       @upload = CampfireExport::Upload.new(self) if is_upload?
     end
 
@@ -389,35 +389,35 @@ module CampfireExport
       end
     end
   end
-  
+
   class Upload
     include CampfireExport::IO
     attr_accessor :message, :room, :date, :id, :filename, :content_type, :byte_size, :full_url
-    
+
     def initialize(message)
       @message = message
       @room = message.room
       @date = message.date
       @deleted = false
     end
-    
+
     def deleted?
       @deleted
     end
-    
+
     def is_image?
       content_type.start_with?("image/")
     end
-    
+
     def upload_dir
       "uploads/#{id}"
     end
-    
+
     # Image thumbnails are used to inline image uploads in HTML transcripts.
     def thumb_dir
       "thumbs/#{id}"
     end
-    
+
     def export
       begin
         log(:info, "    #{message.body} ... ")
@@ -425,7 +425,7 @@ module CampfireExport
         # Get the upload object corresponding to this message.
         upload_path = "/room/#{room.id}/messages/#{message.id}/upload.xml"
         upload = Nokogiri::XML get(upload_path).body
-        
+
         # Get the upload itself and export it.
         @id = upload.xpath('/upload/id').text
         @byte_size = upload.xpath('/upload/byte-size').text.to_i
@@ -435,7 +435,7 @@ module CampfireExport
 
         export_content(upload_dir)
         export_content(thumb_dir, path_component="thumb/#{id}", verify=false) if is_image?
-                
+
         log(:info, "ok\n")
       rescue CampfireExport::Exception => e
         if e.code == 404
@@ -447,12 +447,12 @@ module CampfireExport
         end
       end
     end
-    
+
     def export_content(content_dir, path_component=nil, verify=true)
       # If the export directory name is different than the URL path component,
       # the caller can define the path_component separately.
       path_component ||= content_dir
-      
+
       # Write uploads to a subdirectory, using the upload ID as a directory
       # name to avoid overwriting multiple uploads of the same file within
       # the same day (for instance, if 'Picture 1.png' is uploaded twice
