@@ -377,7 +377,7 @@ module CampfireExport
         :user => nil
       }.tap do |json|
         unless user.nil?
-          json[:user] = { :username => user, :id => user_id }
+          json[:user] = { :name => user, :id => user_id }
         end
       end
     end
