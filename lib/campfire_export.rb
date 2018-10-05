@@ -26,6 +26,7 @@ require 'campfire_export/timezone'
 
 require 'cgi'
 require 'fileutils'
+require 'json'
 require 'httparty'
 require 'nokogiri'
 require 'time'
@@ -165,6 +166,13 @@ module CampfireExport
       @created_at = Account.timezone.utc_to_local(created_utc)
     end
 
+    def to_hash
+      {
+        :name => name,
+        :id => id
+      }
+    end
+
     def export(start_date=nil, end_date=nil)
       # Figure out how to do the least amount of work while still conforming
       # to the requester's boundary dates.
@@ -199,7 +207,7 @@ module CampfireExport
 
   class Transcript
     include CampfireExport::IO
-    attr_accessor :room, :date, :xml, :messages
+    attr_accessor :room, :date, :json, :xml, :messages
 
     def initialize(room, date)
       @room     = room
@@ -230,6 +238,7 @@ module CampfireExport
             log(:error, "Unable to create #{export_dir}", e)
           else
             export_xml
+            export_json
             export_plaintext
             export_html
             export_uploads
@@ -259,6 +268,20 @@ module CampfireExport
         verify_export('transcript.txt', plaintext.bytesize)
       rescue Exception => e
         log(:error, "Plaintext transcript export for #{export_dir} failed", e)
+      end
+    end
+
+    def export_json
+      begin
+        json_str = JSON.pretty_generate({
+          :room => room.to_hash,
+          :date => date,
+          :messages => messages.map {|m| m.to_hash}
+        })
+        export_file(json_str, 'transcript.json')
+        verify_export('transcript.json', json_str.bytesize)
+      rescue Exception => e
+        log(:error, "JSON transcript export for #{export_dir} failed", e)
       end
     end
 
@@ -298,7 +321,7 @@ module CampfireExport
 
   class Message
     include CampfireExport::IO
-    attr_accessor :id, :room, :body, :type, :user, :date, :timestamp, :upload
+    attr_accessor :id, :room, :body, :type, :user, :user_id, :date, :time, :timestamp, :upload
 
     def initialize(message, room, date)
       @id = message.xpath('id').text
@@ -306,14 +329,15 @@ module CampfireExport
       @date = date
       @body = message.xpath('body').text
       @type = message.xpath('type').text
+      @timestamp = Time.parse message.xpath('created-at').text
 
-      time = Time.parse message.xpath('created-at').text
-      localtime = CampfireExport::Account.timezone.utc_to_local(time)
-      @timestamp = localtime.strftime '%I:%M %p'
+      localtime = CampfireExport::Account.timezone.utc_to_local(@timestamp)
+      @time = localtime.strftime '%I:%M %p'
 
       no_user = ['TimestampMessage', 'SystemMessage', 'AdvertisementMessage']
       unless no_user.include?(@type)
-        @user = username(message.xpath('user-id').text)
+        @user_id = message.xpath('user-id').text
+        @user = username(@user_id)
       end
 
       @upload = CampfireExport::Upload.new(self) if is_upload?
@@ -343,6 +367,19 @@ module CampfireExport
 
     def indent(string, count)
       (' ' * count) + string.gsub(/(\n+)/) { $1 + (' ' * count) }
+    end
+
+    def to_hash
+      {
+        :created_at => timestamp.iso8601,
+        :type => type,
+        :body => body,
+        :user => nil
+      }.tap do |json|
+        unless user.nil?
+          json[:user] = { :username => user, :id => user_id }
+        end
+      end
     end
 
     def to_s
@@ -378,7 +415,7 @@ module CampfireExport
       when 'SoundMessage'
         "[#{user} played a sound:] #{body}\n"
       when 'TimestampMessage'
-        "--- #{timestamp} ---\n"
+        "--- #{time} ---\n"
       when 'SystemMessage'
         ""
       when 'AdvertisementMessage'
